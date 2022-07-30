@@ -1,0 +1,63 @@
+##转录组数据Linux处理流程（有参）
+
+#FASTQ文件格式→FastQC（测序质量评估）→Cutadapt（测序数据过滤）→FastQC（查看过滤数据的质量）→Hisat2（与参考基因组进行比对分析）→sam格式文件→SAMtools（sam文件转化为bam格式文件）→IGV软件可视化（检查序列情况，包括snp位点等）→Subread（reads数归一化处理TPM、FPKM等）→rawcounts文件
+
+#得到rawcounts文件后，后续流程在R语言中实现→DESeq2（基因表达差异分析）→Factoextra（PCA图）→ggplot2（火山图）→ggplot2（柱形图，上下调gene在pathway中的分类）→clusterprofiler/org.Mm.eg.db/ggplot2/enrichGO/enrichKEGG（富集分析气泡图）→在线网站Draw Venn Diagram（Venn图）→pheatmap/complexheatmap（差异基因表达热图）→KEGG Mapper（pathway通路分析）
+
+##Linux命令操作
+
+#建立共享文件夹（与window系统交互）
+vmware-hgfsclient
+sudo mkdir /mnt/win
+sudo /usr/bin/vmhgfs-fuse .host:/ /mnt/win -o subtype=vmhgfs-fuse,allow_other
+
+#gz文件解压
+gunzip Filename.gz
+
+#安装fastqc
+conda install -c bioconda fastqc
+#使用fastqc命令
+fastqc -o ./sample1.results/fastQC/ -t 6 ./sample1_R1.fq
+     # -o ：后接输出文件的储存目录
+     #-t ：程序运行的线程数
+     #./sample1_R1.fq：seqFile
+
+#安装Cutadapt
+conda create -n cutadaptenv cutadapt
+#激活cutadapt环境
+conda activate cutadaptenv
+#使用cutadapt命令
+cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -A AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT -q 30 -m 75 --trim -n -o sample1_out1.fq -p sample1_out2.fq sample1_R1.fq sample1_R2.fq
+#通过查看fastqc文件中的Adapter content判断接头
+
+#安装Hisat2
+conda install -c bioconda hisat2
+#创建索引index
+mkdir -p reference/index
+cd reference/index
+wget https://genome-idx.s3.amazonaws.com/hisat/mm10_genome.tar.gz
+tar -zxvf *.tar.gz
+rm -rf *.tar.gz
+#其余索引详见https://daehwankimlab.github.io/hisat2/download/
+#Hisat2使用方法
+hisat2 -p 4 -dta -t -x ./reference/index/mm10/genome -1 ./sample1_out1.fq -2 ./sample1_out2.fq -S ./sam/sample1_out.sam
+#Hisat2跑一个转录组（3GB左右）至少需要8G内存，50G磁盘空间，若空间不足可省略 -p 4 -dta -t
+
+#samtools安装
+conda install -c bioconda samtools
+#sam文件转换为bam文件
+samtools sort -o ./bam/sample1.bam ./sam/sample1_out.sam
+
+#subread安装
+conda install -c bioconda subread
+#使用UCSC下载参考基因组
+UCSC网站→downloads→genome data→mouse→genome sequence files and select annotations (2 bit, GTF.GC-content.etc）→genes/→mm10.refGene.gtf.gz
+gunzip mm10.refGene.gtf.gz
+#使用subread中的FeatureCounts统计
+featureCounts -T 6 -p -t exon -g gene_id -a ./GTF/mm10.refGene.gtf -o ./results/featureCounts.txt  ./bam/sample1.bam ./bam/sample2.bam ./bam/sample3.bam
+     # -p ：paired
+     #mm10.refGene.gtf ：参考gtf
+     #featureCounts.txt：输出
+
+#在使用IGV软件之前需要对bam文件创建索引
+samtools index -b sample1.bam
